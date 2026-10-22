@@ -11,4 +11,3 @@ CONTRIBUTING.md
 .gitignore
 *.log
 *.tgz
-.commandcode/

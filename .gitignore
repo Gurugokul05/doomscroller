@@ -4,9 +4,9 @@ coverage/
 *.log
 *.tgz
 *.tsbuildinfo
-.commandcode/
 .env
 .env.*
 .idea/
 .DS_Store
 Thumbs.db
+.commandcode

@@ -1,0 +1,68 @@
+name: New agent request
+description: Request support for another AI coding agent or IDE.
+title: "[agent]: "
+labels: ["enhancement", "new-agent"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        doomscroller supports agents through four patterns: hooks, a PTY
+        wrapper, IDE window activity, and the manual hotkey. Tell us which
+        signals the agent exposes so we can pick the right adapter.
+  - type: input
+    id: agent
+    attributes:
+      label: Agent or IDE name
+      placeholder: Example Agent
+    validations:
+      required: true
+  - type: input
+    id: link
+    attributes:
+      label: Project link
+      description: Documentation, repository, or download page.
+    validations:
+      required: true
+  - type: dropdown
+    id: pattern
+    attributes:
+      label: Which integration seems possible?
+      options:
+        - Hooks or lifecycle events
+        - Terminal CLI (PTY wrapper)
+        - GUI window / IDE activity
+        - Manual hotkey only
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: signals
+    attributes:
+      label: Start and finish signals
+      description: How can doomscroller tell that a prompt was submitted and that the agent finished?
+      placeholder: |
+        Start: ...
+        Finish: ...
+    validations:
+      required: true
+  - type: input
+    id: window
+    attributes:
+      label: Window process and title
+      description: For GUI agents, include the process name and a sample window title.
+      placeholder: Code — main.ts - Visual Studio Code
+  - type: textarea
+    id: config
+    attributes:
+      label: Config sketch
+      description: If you tried `registeredAgents` or a hook, paste what you used.
+      render: json
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing agent requests.
+          required: true
+        - label: The agent is publicly available or I can provide access details.
+          required: true

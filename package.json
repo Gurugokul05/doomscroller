@@ -1,0 +1,56 @@
+{
+  "name": "doomscroller",
+  "version": "0.1.0",
+  "description": "Doomscroll while your AI coding agent works, then bring the agent window back when it finishes.",
+  "license": "MIT",
+  "author": "Gurugokul",
+  "bin": {
+    "doomscroller": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist",
+    "scripts",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "keywords": [
+    "ai",
+    "claude-code",
+    "copilot",
+    "antigravity",
+    "productivity",
+    "cli"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Gurugokul05/doomscroller.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Gurugokul05/doomscroller/issues"
+  },
+  "homepage": "https://github.com/Gurugokul05/doomscroller#readme",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\" \"vitest.config.ts\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "dependencies": {
+    "node-pty": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "eslint": "^10.13.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.72.0",
+    "vitest": "^2.1.0"
+  }
+}

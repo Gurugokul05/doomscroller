@@ -1,0 +1,14 @@
+src/
+tests/
+.github/
+docs/
+coverage/
+node_modules/
+tsconfig*.json
+vitest.config.ts
+eslint.config.mjs
+CONTRIBUTING.md
+.gitignore
+*.log
+*.tgz
+.commandcode/

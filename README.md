@@ -2,7 +2,7 @@
 
 Doomscroll while your AI coding agent works, then get pulled back when the agent finishes.
 
-[![npm version](https://img.shields.io/npm/v/doomscroller.svg?label=npm)](https://www.npmjs.com/package/doomscroller)
+[![npm version](https://img.shields.io/npm/v/@gurugokul/doomscroller.svg?label=npm)](https://www.npmjs.com/package/@gurugokul/doomscroller)
 [![license](https://img.shields.io/github/license/Gurugokul05/doomscroller.svg)](https://github.com/Gurugokul05/doomscroller/blob/main/LICENSE)
 [![platform](https://img.shields.io/badge/platform-Windows-0078D6)](#quick-start)
 
@@ -25,7 +25,7 @@ a productivity system.
 1. **Install it globally:**
 
    ```powershell
-   npm i -g doomscroller
+   npm i -g @gurugokul/doomscroller
    ```
 
 2. **Install the Claude Code hooks** (this also creates `~/.doomscroller.json`):

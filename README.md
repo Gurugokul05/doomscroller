@@ -6,12 +6,7 @@ Doomscroll while your AI coding agent works, then get pulled back when the agent
 [![license](https://img.shields.io/github/license/Gurugokul05/doomscroller.svg)](https://github.com/Gurugokul05/doomscroller/blob/main/LICENSE)
 [![platform](https://img.shields.io/badge/platform-Windows-0078D6)](#quick-start)
 
-![demo](./docs/demo.gif)
-
-> **Demo GIF TODO:** Record an 8–12 second loop and save it as `docs/demo.gif`:
-> submit a prompt → the agent window minimizes → Instagram/X opens → the agent
-> finishes → the agent window returns. Keep it under ~5 MB. The
-> `Ctrl+Alt+D` force-return should be visible in the clip.
+![Doomscroller Demo](./docs/demo.gif)
 
 ## Why
 

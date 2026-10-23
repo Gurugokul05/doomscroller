@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { errorMessage } from '../util/errors';
-import { antigravityHooksPath, cliEntryPath } from '../util/paths';
+import { antigravityHooksPath, cliEntryPath, stateDirectory } from '../util/paths';
 
 /**
  * Antigravity keeps its hooks in a `hooks.json` whose shape differs from the
@@ -14,8 +14,20 @@ import { antigravityHooksPath, cliEntryPath } from '../util/paths';
  * a second prompt in the same conversation would never start a session.
  *
  * Finish is `Stop`, gated on the payload's `fullyIdle` flag.
+ *
+ * Command form: Antigravity runs the `command` string through a shell on
+ * Windows. A command that *starts* with a quoted path is not executed (cmd
+ * folds the leading quote into the program name; PowerShell needs the call
+ * operator). A `powershell.exe -NoProfile -Command "& '<node>' '<cli>' ..."`
+ * wrapper does not work either: the nested quoting is lost and the literal
+ * `& '<node>' '<cli>' ...` text is captured as the hook's stdout, which then
+ * fails Antigravity's JSON parse ("invalid value &"). So the interpreter is
+ * always the bare `node` and only the script argument is ever quoted.
  */
 export const HOOK_NAME = 'doomscroller';
+
+/** A legacy group the first prototypes used; never modified, only warned about. */
+export const LEGACY_HOOK_NAME = 'doomscroll';
 
 export const HOOK_EVENTS = ['PreInvocation', 'Stop'] as const;
 
@@ -41,33 +53,19 @@ function needsQuoting(value: string): boolean {
   return /[\s"'&|<>^()%!$`*?]/.test(value);
 }
 
-/** PowerShell single-quoted literal; embedded single quotes are doubled. */
-function powerShellLiteral(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
+/** Double-quote a value only when leaving it bare would break the shell. */
+function quoteArgument(value: string): string {
+  return needsQuoting(value) ? `"${value}"` : value;
 }
 
 /**
- * Builds the command Antigravity runs for one hook action.
- *
- * A command that begins with a quoted path is not executed: PowerShell needs
- * the call operator (`&`) before a quoted path, and cmd folds the leading quote
- * into the program name. So the bare form is only used when it needs no quoting
- * at all; anything else is handed to PowerShell explicitly.
+ * Builds the command Antigravity runs for one hook action when `node` resolves
+ * from PATH. The command never begins with a quote, so both cmd.exe and
+ * PowerShell execute it; the CLI path is quoted only when it needs it. The
+ * interpreter is the bare `node`, so `nodePath` is irrelevant here.
  */
-export function buildHookCommand(options: {
-  action: HookAction;
-  nodePath: string;
-  cliPath: string;
-  nodeOnPath: boolean;
-}): string {
-  const { action, nodePath, cliPath, nodeOnPath } = options;
-  if (nodeOnPath && !needsQuoting(nodePath) && !needsQuoting(cliPath)) {
-    return `node ${cliPath} ${ACTION_ARGUMENT} ${action}`;
-  }
-  return (
-    `powershell.exe -NoProfile -Command "& ${powerShellLiteral(nodePath)} ` +
-    `${powerShellLiteral(cliPath)} ${ACTION_ARGUMENT} ${action}"`
-  );
+export function buildHookCommand(options: { action: HookAction; cliPath: string }): string {
+  return `node ${quoteArgument(options.cliPath)} ${ACTION_ARGUMENT} ${options.action}`;
 }
 
 /** True when `process.execPath` is the `node` a shell finds on PATH. */
@@ -85,13 +83,77 @@ export function nodeResolvesOnPath(): boolean {
   return false;
 }
 
-export function hookCommands(nodeOnPath: boolean = nodeResolvesOnPath()): Record<string, string> {
-  const base = { nodePath: process.execPath, cliPath: cliEntryPath(), nodeOnPath };
+/** Name of the wrapper script used when `node` cannot be resolved from PATH. */
+export function wrapperFileName(action: HookAction): string {
+  return process.platform === 'win32'
+    ? `antigravity-hook-${action}.cmd`
+    : `antigravity-hook-${action}.sh`;
+}
+
+/** A wrapper that re-invokes the CLI through the absolute node path. */
+function wrapperContents(nodePath: string, cliPath: string, action: HookAction): string {
+  const invocation = `${quoteArgument(nodePath)} ${quoteArgument(cliPath)} ${ACTION_ARGUMENT} ${action}`;
+  return process.platform === 'win32' ? `@echo off\r\n${invocation}\r\n` : `#!/bin/sh\nexec ${invocation}\n`;
+}
+
+export interface PlannedHooks {
+  /** event name -> command to store in hooks.json */
+  commands: Record<string, string>;
+  /** files that must exist before the commands can run */
+  wrappers: { path: string; contents: string }[];
+  /** set when no command Antigravity can execute could be produced */
+  error?: string;
+}
+
+/**
+ * Decides the command for every hook event. With `node` on PATH this is the
+ * bare form. Otherwise it generates a wrapper script that calls the absolute
+ * node path; if even the wrapper path cannot be expressed without a leading
+ * quote, it returns an error instead of writing a command that never runs.
+ */
+export function planAntigravityHooks(
+  options: {
+    nodeOnPath?: boolean;
+    nodePath?: string;
+    cliPath?: string;
+    wrapperDirectory?: string;
+  } = {},
+): PlannedHooks {
+  const nodeOnPath = options.nodeOnPath ?? nodeResolvesOnPath();
+  const nodePath = options.nodePath ?? process.execPath;
+  const cliPath = options.cliPath ?? cliEntryPath();
+  const wrapperDirectory = options.wrapperDirectory ?? stateDirectory();
+
   const commands: Record<string, string> = {};
+  const wrappers: { path: string; contents: string }[] = [];
+
   for (const eventName of HOOK_EVENTS) {
-    commands[eventName] = buildHookCommand({ ...base, action: HOOK_ACTIONS[eventName] });
+    const action = HOOK_ACTIONS[eventName];
+    if (nodeOnPath) {
+      commands[eventName] = buildHookCommand({ action, cliPath });
+      continue;
+    }
+    const wrapperPath = path.join(wrapperDirectory, wrapperFileName(action));
+    if (needsQuoting(wrapperPath)) {
+      return {
+        commands: {},
+        wrappers: [],
+        error:
+          `node is not on PATH and the wrapper path "${wrapperPath}" contains spaces or shell ` +
+          'metacharacters that Antigravity cannot execute. Put node on PATH (or set ' +
+          'DOOMSCROLLER_HOME to a path without spaces) and re-run `doomscroller init antigravity`.',
+      };
+    }
+    wrappers.push({ path: wrapperPath, contents: wrapperContents(nodePath, cliPath, action) });
+    commands[eventName] = wrapperPath;
   }
-  return commands;
+
+  return { commands, wrappers };
+}
+
+/** Convenience wrapper returning just the commands for the current machine. */
+export function hookCommands(nodeOnPath: boolean = nodeResolvesOnPath()): Record<string, string> {
+  return planAntigravityHooks({ nodeOnPath }).commands;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -106,15 +168,17 @@ function canonicalHandler(command: string): Record<string, unknown> {
 
 /**
  * True when a stored command already invokes this doomscroller hook action,
- * whatever form it was written in — including the old quoted-path form that
- * Antigravity refuses to execute.
+ * whatever form it was written in — the old quoted-path form, the removed
+ * PowerShell `-Command "& ..."` form, or a generated wrapper script.
  */
 export function commandTargetsAction(command: string, action: HookAction): boolean {
   const trimmed = command.trim();
-  // The PowerShell form closes with the -Command quote and the bare form does
-  // not, so a trailing quote after the action argument is allowed.
-  if (!new RegExp(`(?:^|[\\s"'])${action}["']?\\s*$`, 'i').test(trimmed)) return false;
   const lower = trimmed.toLowerCase();
+  // Wrapper form: `...\antigravity-hook-<action>.cmd`.
+  if (lower.includes(`${ACTION_ARGUMENT}-${action}`)) return true;
+  // Bare or `-Command`-wrapped form: the action is the trailing argument (a
+  // trailing quote after it is allowed).
+  if (!new RegExp(`(?:^|[\\s"'])${action}["']?\\s*$`, 'i').test(trimmed)) return false;
   return (
     lower.includes(ACTION_ARGUMENT) ||
     lower.includes('doomscroller') ||
@@ -131,7 +195,8 @@ interface NormalizeResult {
 /**
  * Ensures the handler list holds exactly one doomscroller handler carrying the
  * canonical command. A stale command is replaced in place rather than appended,
- * so re-running the installer upgrades it instead of stacking duplicates.
+ * so re-running the installer upgrades the old quoted or wrapped form instead
+ * of stacking duplicates.
  */
 function normalizeHandlers(
   handlers: unknown[],
@@ -176,13 +241,15 @@ export interface HookMergeResult {
   hooks: Record<string, unknown>;
   added: string[];
   existing: string[];
+  /** True when a legacy `doomscroll` group is present (left untouched). */
+  legacyGroup: boolean;
   error?: string;
 }
 
 /**
  * Adds or upgrades the doomscroller hook group without touching any other named
- * hook (including a legacy `doomscroll` group). Re-running with the same
- * commands is a no-op.
+ * hook (including a legacy `doomscroll` group, which is only reported). Running
+ * again with the same commands is a no-op.
  */
 export function mergeAntigravityHooks(
   hooksFile: unknown,
@@ -190,12 +257,14 @@ export function mergeAntigravityHooks(
   actions: Record<string, HookAction> = HOOK_ACTIONS,
 ): HookMergeResult {
   const root = asRecord(hooksFile) ?? {};
+  const legacyGroup = root[LEGACY_HOOK_NAME] !== undefined;
   const groupRaw = root[HOOK_NAME];
   if (groupRaw !== undefined && !asRecord(groupRaw)) {
     return {
       hooks: root,
       added: [],
       existing: [],
+      legacyGroup,
       error: `"${HOOK_NAME}" in hooks.json is not an object`,
     };
   }
@@ -211,6 +280,7 @@ export function mergeAntigravityHooks(
         hooks: root,
         added,
         existing,
+        legacyGroup,
         error: `hooks.json ${HOOK_NAME}.${eventName} exists but is not an array; refusing to overwrite it`,
       };
     }
@@ -226,7 +296,7 @@ export function mergeAntigravityHooks(
     added.push(eventName);
   }
 
-  return { hooks: { ...root, [HOOK_NAME]: group }, added, existing };
+  return { hooks: { ...root, [HOOK_NAME]: group }, added, existing, legacyGroup };
 }
 
 export interface HookInstallResult {
@@ -234,6 +304,8 @@ export interface HookInstallResult {
   added: string[];
   existing: string[];
   changed: boolean;
+  /** True when a legacy `doomscroll` group is present (left untouched). */
+  legacyGroup: boolean;
   error?: string;
 }
 
@@ -241,39 +313,64 @@ export function installAntigravityHooks(
   hooksPath: string = antigravityHooksPath(),
   nodeOnPath: boolean = nodeResolvesOnPath(),
 ): HookInstallResult {
-  let raw: unknown = {};
-  try {
-    const text = fs.readFileSync(hooksPath, 'utf8').replace(/^\uFEFF/, '');
-    if (text.trim() !== '') raw = JSON.parse(text);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== 'ENOENT') {
-      return {
-        hooksPath,
-        added: [],
-        existing: [],
-        changed: false,
-        error: `could not read ${hooksPath}: ${errorMessage(error)}`,
-      };
-    }
+  const planned = planAntigravityHooks({ nodeOnPath, wrapperDirectory: stateDirectory() });
+  if (planned.error) {
+    return {
+      hooksPath,
+      added: [],
+      existing: [],
+      changed: false,
+      legacyGroup: false,
+      error: planned.error,
+    };
   }
 
-  const merged = mergeAntigravityHooks(raw, hookCommands(nodeOnPath));
+  let raw: unknown = {};
+  const read = (): string | null => {
+    try {
+      const text = fs.readFileSync(hooksPath, 'utf8').replace(/^\uFEFF/, '');
+      if (text.trim() !== '') raw = JSON.parse(text);
+      return null;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') return null;
+      return `could not read ${hooksPath}: ${errorMessage(error)}`;
+    }
+  };
+  const readError = read();
+  if (readError) {
+    return { hooksPath, added: [], existing: [], changed: false, legacyGroup: false, error: readError };
+  }
+
+  const merged = mergeAntigravityHooks(raw, planned.commands);
   if (merged.error) {
     return {
       hooksPath,
       added: merged.added,
       existing: merged.existing,
       changed: false,
+      legacyGroup: merged.legacyGroup,
       error: merged.error,
     };
   }
 
   if (merged.added.length === 0) {
-    return { hooksPath, added: [], existing: merged.existing, changed: false };
+    return {
+      hooksPath,
+      added: [],
+      existing: merged.existing,
+      changed: false,
+      legacyGroup: merged.legacyGroup,
+    };
   }
 
   try {
+    // Write the wrapper scripts first so hooks.json never points at a file that
+    // does not exist yet.
+    for (const wrapper of planned.wrappers) {
+      fs.mkdirSync(path.dirname(wrapper.path), { recursive: true });
+      fs.writeFileSync(wrapper.path, wrapper.contents, 'utf8');
+    }
     fs.mkdirSync(path.dirname(hooksPath), { recursive: true });
     if (fs.existsSync(hooksPath)) {
       fs.copyFileSync(hooksPath, `${hooksPath}.doomscroller.bak`);
@@ -299,6 +396,7 @@ export function installAntigravityHooks(
       added: merged.added,
       existing: merged.existing,
       changed: true,
+      legacyGroup: merged.legacyGroup,
     };
   } catch (error) {
     return {
@@ -306,6 +404,7 @@ export function installAntigravityHooks(
       added: merged.added,
       existing: merged.existing,
       changed: false,
+      legacyGroup: merged.legacyGroup,
       error: `could not write ${hooksPath}: ${errorMessage(error)}`,
     };
   }

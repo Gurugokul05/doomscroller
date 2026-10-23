@@ -3,6 +3,23 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.1] - 2026-10-23
+
+### Fixed
+
+- `doomscroller init antigravity` wrote a hook command Antigravity could not
+  execute. The previous release wrapped the CLI in
+  `powershell.exe -NoProfile -Command "& '<node>' '<cli>' ..."`, but Antigravity
+  loses the nested quoting and captures the literal `& '<node>' '<cli>' ...` text
+  as the hook's stdout, which then fails its JSON parse ("invalid value &") — so
+  the CLI never ran and no session started or finished (sessions ran to the
+  `maxDoomscrollSeconds` cap and were reported as `working`). `init antigravity`
+  now emits the bare `node <cli> antigravity-hook <action>` form, quoting only
+  the CLI path when it contains spaces, and never a `-Command` wrapper. When
+  `node` is not on PATH it generates a `~/.doomscroller/antigravity-hook-<action>.cmd`
+  wrapper that calls the absolute node path; if no runnable command can be built
+  it reports an error and refuses to write one.
+
 ## [0.3.0] - 2026-10-23
 
 ### Added

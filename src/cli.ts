@@ -14,7 +14,7 @@ import { AGENT_FINISHED, AGENT_STARTED, AgentEvent } from './core/types';
 import { errorMessage } from './util/errors';
 import { configFilePath, stateDirectory } from './util/paths';
 
-export const VERSION = '0.3.0';
+export const VERSION = '0.3.1';
 
 function usage(): string {
   return `doomscroller ${VERSION} - doomscroll while your coding agent works
@@ -212,14 +212,22 @@ function logAntigravityHook(action: string, decision: string, raw: string): void
 }
 
 /**
+ * Antigravity parses this hook's stdout as JSON (see
+ * https://antigravity.google/docs/hooks). `PreInvocation` takes an optional
+ * `injectSteps` and the docs mark `Stop`'s `decision` as required — but the only
+ * `Stop` value the docs define is `"continue"` (which would keep the agent
+ * running); no non-`"continue"` value is specified. So we emit `{}` for both
+ * events, which is valid JSON and, per the docs, lets the stop proceed.
+ */
+const HOOK_OUTPUT = '{}\n';
+
+/**
  * Antigravity hook entry point (`antigravity-hook start|done`).
  *
  * Antigravity fires `Stop` on every termination of the execution loop,
  * including terminations that leave background tasks running. Its payload
  * carries `fullyIdle`, which is only true once the agent has completely
  * finished, so a stop with `fullyIdle: false` is not a real finish.
- *
- * Antigravity also expects a JSON object on stdout.
  */
 async function antigravityHookCommand(action: string | undefined): Promise<number> {
   if (action !== 'start' && action !== 'done') return 0;
@@ -234,13 +242,13 @@ async function antigravityHookCommand(action: string | undefined): Promise<numbe
   logAntigravityHook(action, decision, input.raw);
 
   if (suppressed) {
-    process.stdout.write('{}\n');
+    process.stdout.write(HOOK_OUTPUT);
     return 0;
   }
 
   const loaded = loadConfig();
   await emitHookEvent(action === 'start' ? AGENT_STARTED : AGENT_FINISHED, loaded.config.port);
-  process.stdout.write('{}\n');
+  process.stdout.write(HOOK_OUTPUT);
   return 0;
 }
 
@@ -412,6 +420,12 @@ async function initCommand(args: string[]): Promise<number> {
     }
 
     process.stdout.write(`Antigravity hooks: ${result.hooksPath}\n`);
+    if (result.legacyGroup) {
+      process.stdout.write(
+        '  warning: a legacy "doomscroll" hook group is present in hooks.json; it is left ' +
+          'untouched. Remove it yourself if it is stale.\n',
+      );
+    }
     if (result.changed) {
       process.stdout.write(`  added: ${result.added.join(', ') || 'none'}\n`);
       if (result.existing.length > 0) {

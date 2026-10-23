@@ -1,4 +1,5 @@
 import { installClaudeCodeHooks } from './adapters/claude-code-hooks';
+import { installCommandCodeHooks } from './adapters/command-code-hooks';
 import { runCliWrapper } from './adapters/cli-wrapper';
 import { emitHookEvent } from './adapters/hook';
 import { loadConfig, writeDefaultConfig } from './core/config';
@@ -25,12 +26,13 @@ Usage:
   doomscroller run -- <command>       Wrap a terminal agent in a PTY
   doomscroller init                   Create ~/.doomscroller.json
   doomscroller init claude-code       Merge hooks into Claude Code settings
+  doomscroller init command-code      Merge hooks into Command Code settings
   doomscroller config [--path|--json] Show the config path and effective config
   doomscroller stats [--days N|--all] Show doomscroll wait time per day
 
 Adapters:
   1. hotkey        Ctrl+Alt+D starts when idle, force-returns when working
-  2. hook          doomscroller start / done, plus init claude-code
+  2. hook          doomscroller start / done, plus init claude-code / command-code
   3. cli-wrapper   doomscroller run -- claude
   4. ide-activity  Enter in a registered IDE window
 
@@ -211,6 +213,7 @@ async function initCommand(args: string[]): Promise<number> {
         : `Config already exists at ${result.path}\n`,
     );
     process.stdout.write('Next: doomscroller init claude-code\n');
+    process.stdout.write('  or: doomscroller init command-code\n');
     return 0;
   }
 
@@ -246,7 +249,40 @@ async function initCommand(args: string[]): Promise<number> {
     return 0;
   }
 
-  process.stderr.write('Usage: doomscroller init [claude-code]\n');
+  if (args[0] === 'command-code') {
+    const configResult = writeDefaultConfig();
+    process.stdout.write(
+      configResult.created
+        ? `Created ${configResult.path}\n`
+        : `Config already exists at ${configResult.path}\n`,
+    );
+
+    const result = await installCommandCodeHooks();
+    if (result.error) {
+      process.stderr.write(`Could not install Command Code hooks: ${result.error}\n`);
+      return 1;
+    }
+
+    process.stdout.write(`Command Code settings: ${result.settingsPath}\n`);
+    if (result.changed) {
+      process.stdout.write(`  added: ${result.added.join(', ') || 'none'}\n`);
+      if (result.existing.length > 0) {
+        process.stdout.write(`  already present: ${result.existing.join(', ')}\n`);
+      }
+      process.stdout.write('  backup: settings.json.doomscroller.bak\n');
+    } else {
+      process.stdout.write(
+        `  hooks already present: ${result.existing.join(', ') || 'none'}\n`,
+      );
+    }
+    process.stdout.write(
+      'Command Code has no per-prompt hook: PreToolUse starts a session on the first '
+        + 'tool call of a turn and Stop finishes it. Hooks are skipped in plan mode.\n',
+    );
+    return 0;
+  }
+
+  process.stderr.write('Usage: doomscroller init [claude-code|command-code]\n');
   return 1;
 }
 

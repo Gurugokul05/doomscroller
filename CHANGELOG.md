@@ -3,6 +3,28 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-10-23
+
+### Added
+
+- Command Code hook adapter plus `doomscroller init command-code`. It merges a
+  `PreToolUse` → start and a `Stop` → done hook into `~/.commandcode/settings.json`
+  (user scope), mirroring `init claude-code`. Command Code has no per-prompt
+  hook, so start is the first tool call of a turn. Existing hooks are preserved
+  and a `settings.json.doomscroller.bak` backup is created.
+
+### Fixed
+
+- The end-of-session chime now plays. The player spawned PowerShell detached,
+  and a detached, console-less `powershell.exe` exits without running its
+  `-Command`, so `[console]::beep` was a silent no-op.
+- Config is re-read at the start of each session, so `delaySeconds`,
+  `maxDoomscrollSeconds`, `targets`, `browser`, and `sound` take effect without
+  restarting the daemon. A missing or invalid config keeps the previous values;
+  `port` and `hotkey` still require a restart.
+- Removed a redundant daemon spawn on the hook fast-path that could race the
+  dispatch helper and produce `EADDRINUSE` / duplicate daemons.
+
 ## [0.1.0] - 2026-10-22
 
 ### Added

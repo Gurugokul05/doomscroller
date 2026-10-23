@@ -99,9 +99,13 @@ function toWindow(value: unknown): WindowHandle | null {
 
 export class Win32WindowController implements WindowController {
   constructor(
-    private readonly browser: BrowserChoice = 'auto',
+    private browser: BrowserChoice = 'auto',
     private readonly logger?: Logger,
   ) {}
+
+  setBrowser(browser: BrowserChoice): void {
+    this.browser = browser;
+  }
 
   private async invoke(
     action: string,

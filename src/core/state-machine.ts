@@ -71,6 +71,11 @@ export class DoomscrollerStateMachine {
     return this.target;
   }
 
+  /** Refreshes the config used by the next session (delay, cap, ...). */
+  updateConfig(config: DoomscrollerConfig): void {
+    this.deps.config = config;
+  }
+
   /** Serializes events so overlapping hook callbacks can't interleave window operations. */
   handle(event: AgentEvent): Promise<void> {
     if (event === AGENT_STARTED) {

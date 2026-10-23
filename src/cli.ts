@@ -11,7 +11,7 @@ import { AGENT_FINISHED, AGENT_STARTED, AgentEvent } from './core/types';
 import { errorMessage } from './util/errors';
 import { configFilePath } from './util/paths';
 
-export const VERSION = '0.1.0';
+export const VERSION = '0.2.0';
 
 function usage(): string {
   return `doomscroller ${VERSION} - doomscroll while your coding agent works

@@ -4,8 +4,10 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { defaultConfig, loadConfig, mergeConfig, writeDefaultConfig } from '../src/core/config';
 import { installClaudeCodeHooks, mergeClaudeHooks } from '../src/adapters/claude-code-hooks';
+import { installCommandCodeHooks, mergeCommandCodeHooks } from '../src/adapters/command-code-hooks';
 import { aggregateByDay, formatDuration, readSessions, SessionLogger } from '../src/core/stats';
 import { SessionRecord } from '../src/core/types';
+import { commandCodeSettingsPath } from '../src/util/paths';
 import { VERSION } from '../src/cli';
 
 const tempDirectories: string[] = [];
@@ -90,6 +92,18 @@ describe('config', () => {
     expect(loaded.config.delaySeconds).toBe(10);
   });
 
+  it('resolves the Command Code settings path from the environment', () => {
+    const original = process.env.COMMANDCODE_CONFIG_DIR;
+    try {
+      const directory = tempDir();
+      process.env.COMMANDCODE_CONFIG_DIR = directory;
+      expect(commandCodeSettingsPath()).toBe(path.join(directory, 'settings.json'));
+    } finally {
+      if (original === undefined) delete process.env.COMMANDCODE_CONFIG_DIR;
+      else process.env.COMMANDCODE_CONFIG_DIR = original;
+    }
+  });
+
   it('writes a default config once', () => {
     const filePath = path.join(tempDir(), '.doomscroller.json');
     expect(writeDefaultConfig(filePath).created).toBe(true);
@@ -170,6 +184,80 @@ describe('claude code hooks', () => {
     const settingsPath = path.join(tempDir(), 'settings.json');
     writeFileSync(settingsPath, `\uFEFF${JSON.stringify({ theme: 'dark' })}`, 'utf8');
     const result = await installClaudeCodeHooks(settingsPath);
+    expect(result.error).toBeUndefined();
+    expect(result.changed).toBe(true);
+  });
+});
+
+describe('command code hooks', () => {
+  const commands = {
+    PreToolUse: '"node.exe" "C:\\doomscroller\\dist\\index.js" start',
+    Stop: '"node.exe" "C:\\doomscroller\\dist\\index.js" done',
+  };
+
+  it('preserves existing hooks and adds doomscroller hooks', () => {
+    const settings = {
+      permissions: { allow: ['Bash(npm test)'] },
+      hooks: {
+        PreToolUse: [{ matcher: 'shell', hooks: [{ type: 'command', command: './guard.sh' }] }],
+      },
+    };
+
+    const merged = mergeCommandCodeHooks(settings, commands);
+    expect(merged.error).toBeUndefined();
+    expect(merged.added).toEqual(['PreToolUse', 'Stop']);
+    expect(merged.settings.permissions).toEqual({ allow: ['Bash(npm test)'] });
+
+    const hooks = merged.settings.hooks as Record<string, unknown[]>;
+    expect(hooks.PreToolUse).toHaveLength(2);
+    expect(JSON.stringify(hooks.PreToolUse[0])).toContain('guard.sh');
+    // Stop must not carry a matcher or Command Code will not fire it.
+    expect(hooks.Stop).toEqual([{ hooks: [{ type: 'command', command: commands.Stop }] }]);
+
+    const again = mergeCommandCodeHooks(merged.settings, commands);
+    expect(again.added).toEqual([]);
+    expect(again.existing).toEqual(['PreToolUse', 'Stop']);
+  });
+
+  it('refuses to overwrite an existing non-array hook event', () => {
+    const result = mergeCommandCodeHooks({ hooks: { Stop: 'not-an-array' } }, commands);
+    expect(result.error).toContain('not an array');
+  });
+
+  it('installs into a settings file and creates a backup', async () => {
+    const settingsPath = path.join(tempDir(), 'settings.json');
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: 'command', command: 'keep me' }] }] } }),
+      'utf8',
+    );
+
+    const result = await installCommandCodeHooks(settingsPath);
+    expect(result.error).toBeUndefined();
+    expect(result.changed).toBe(true);
+    expect(result.added).toEqual(['PreToolUse', 'Stop']);
+
+    const saved = JSON.parse(readFileSync(settingsPath, 'utf8'));
+    expect(saved.hooks.PreToolUse).toHaveLength(1);
+    expect(saved.hooks.Stop).toHaveLength(2);
+    expect(readFileSync(`${settingsPath}.doomscroller.bak`, 'utf8')).toContain('keep me');
+
+    const second = await installCommandCodeHooks(settingsPath);
+    expect(second.changed).toBe(false);
+  });
+
+  it('does not overwrite invalid settings JSON', async () => {
+    const settingsPath = path.join(tempDir(), 'settings.json');
+    writeFileSync(settingsPath, '{ invalid', 'utf8');
+    const result = await installCommandCodeHooks(settingsPath);
+    expect(result.error).toBeTruthy();
+    expect(readFileSync(settingsPath, 'utf8')).toBe('{ invalid');
+  });
+
+  it('reads settings written with a UTF-8 BOM', async () => {
+    const settingsPath = path.join(tempDir(), 'settings.json');
+    writeFileSync(settingsPath, `\uFEFF${JSON.stringify({ permissions: {} })}`, 'utf8');
+    const result = await installCommandCodeHooks(settingsPath);
     expect(result.error).toBeUndefined();
     expect(result.changed).toBe(true);
   });

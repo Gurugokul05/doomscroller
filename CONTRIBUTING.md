@@ -42,8 +42,8 @@ npm run build
   command resolution.
 - `ide-activity.test.ts` covers window matching, CPU/file activity, quiet
   finish, and workspace scanning.
-- `config-hooks-stats.test.ts` covers config validation, Claude Code hook
-  merging, BOM handling, and stats aggregation.
+- `config-hooks-stats.test.ts` covers config validation, Claude Code and
+  Command Code hook merging, BOM handling, and stats aggregation.
 
 Do not use real windows, browsers, or the user's profile in automated tests.
 Inject a clock, scheduler, probe, or workspace scanner instead. `tests/helpers.ts`

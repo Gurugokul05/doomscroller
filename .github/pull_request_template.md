@@ -18,6 +18,7 @@
 - [ ] `npm run build`
 - [ ] Manual Windows check for window/focus changes
 - [ ] Adapter/hook failure path checked
+- [ ] `doomscroller init <agent>` merge path checked (existing hooks preserved)
 
 ## Checklist
 

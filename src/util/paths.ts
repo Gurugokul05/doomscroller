@@ -40,6 +40,13 @@ export function claudeSettingsPath(): string {
   return path.join(base, 'settings.json');
 }
 
+export function commandCodeSettingsPath(): string {
+  const base = process.env.COMMANDCODE_CONFIG_DIR
+    ? path.resolve(expandHome(process.env.COMMANDCODE_CONFIG_DIR))
+    : path.join(os.homedir(), '.commandcode');
+  return path.join(base, 'settings.json');
+}
+
 export function packageRoot(): string {
   // dist/util -> package root, or src/util -> package root.
   return path.resolve(__dirname, '..', '..');

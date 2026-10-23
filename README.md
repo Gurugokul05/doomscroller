@@ -28,11 +28,15 @@ a productivity system.
    npm i -g @gurugokul/doomscroller
    ```
 
-2. **Install the Claude Code hooks** (this also creates `~/.doomscroller.json`):
+2. **Install your agent's hooks** (this also creates `~/.doomscroller.json`):
 
    ```powershell
-   doomscroller init claude-code
+   doomscroller init claude-code     # Claude Code
+   doomscroller init command-code    # Command Code
    ```
+
+   `init command-code` merges the hooks into `~/.commandcode/settings.json` the
+   same way `init claude-code` does for Claude Code.
 
 3. **Run your agent and submit a prompt:**
 
@@ -59,12 +63,17 @@ against that agent's current release. "Planned" means it is not implemented.
 | Agent | Adapter | Status | Notes |
 | --- | --- | --- | --- |
 | Claude Code | hook | Working | `doomscroller init claude-code` merges `UserPromptSubmit` → start and `Stop`/`Notification` → done into `~/.claude/settings.json`. Verify the hooks fire in your Claude Code version. |
-| Command Code | cli-wrapper | Experimental | `doomscroller run -- cmdc`. The PTY wrapper is tested, but this specific binary is not. |
+| Command Code | hook | Working | `doomscroller init command-code` merges `PreToolUse` → start and `Stop` → done into `~/.commandcode/settings.json`. Command Code has no per-prompt hook, so a session starts on a turn's first tool call; hooks are skipped in plan mode. Verify the hooks fire in your Command Code version. |
 | GitHub Copilot CLI | cli-wrapper | Experimental | `doomscroller run -- copilot`. Behavior depends on the CLI's terminal output. |
 | Antigravity | ide-activity | Experimental | Match the window by process and/or title, set `workspace`, and press Enter in the window. |
 | VS Code + Copilot | ide-activity | Experimental | Same heuristic. Use a generous `quietSeconds` and an absolute `workspace`. |
 | Other GUI IDEs (Cursor, etc.) | ide-activity | Experimental | Add a `registeredAgents` entry with the app's process/title and a workspace. |
 | Any foreground app | hotkey | Working | `Ctrl+Alt+D` starts a manual session when idle and force-returns when working. The global key press needs a real key to verify; see [Troubleshooting](#troubleshooting). |
+
+A terminal agent without hooks can also be wrapped with
+`doomscroller run -- <command>` (for example `doomscroller run -- cmdc`). The
+hook path is more accurate for Command Code, because it no longer depends on
+terminal silence to decide the session is finished.
 
 macOS and Linux support is **planned**. The state machine and tests are
 platform-neutral, but window control is Win32-only. See
@@ -140,6 +149,7 @@ Environment overrides, useful for tests and alternate installs:
 - `DOOMSCROLLER_HOME` — base directory for config, logs, and sessions.
 - `DOOMSCROLLER_CONFIG` — explicit config file path.
 - `CLAUDE_CONFIG_DIR` — Claude Code config directory used by `init claude-code`.
+- `COMMANDCODE_CONFIG_DIR` — Command Code config directory used by `init command-code`.
 
 Use `doomscroller config` to print the config path and the effective merged
 config. Use `doomscroller config --path` for only the path or
@@ -177,6 +187,7 @@ config. Use `doomscroller config --path` for only the path or
 | --- | --- |
 | `doomscroller init` | Create `~/.doomscroller.json` if it does not exist. |
 | `doomscroller init claude-code` | Create the config and merge the Claude Code hooks into `~/.claude/settings.json`. Existing hooks are preserved, and `settings.json.doomscroller.bak` is created when the file already exists. |
+| `doomscroller init command-code` | Create the config and merge the Command Code hooks into `~/.commandcode/settings.json` (`PreToolUse` → start, `Stop` → done). Existing hooks are preserved, and `settings.json.doomscroller.bak` is created when the file already exists. |
 | `doomscroller start` | Emit `agent:started`. Hook-safe: exits quickly, never blocks the agent, and auto-starts the daemon if needed. |
 | `doomscroller done` | Emit `agent:finished`. Same hook-safe behavior. |
 | `doomscroller run -- <command>` | Run a terminal agent in a PTY. Enter starts, output resets the quiet timer, `quietSeconds` of silence or process exit finishes. |
@@ -210,7 +221,7 @@ daemon hosts the adapters and exposes a localhost IPC endpoint:
 
 - **hotkey** watches for the configured key.
 - **hook** is the `doomscroller start` / `doomscroller done` pair, plus the
-  Claude Code settings merger.
+  Claude Code and Command Code settings mergers.
 - **cli-wrapper** runs a command in a PTY and derives start/finish from Enter,
   output, silence, and process exit.
 - **ide-activity** watches Enter in registered windows, then uses workspace
@@ -249,6 +260,18 @@ installation's `dist/index.js`. Invalid settings JSON is never overwritten; fix
 the JSON or restore `settings.json.doomscroller.bak`. Then check
 `doomscroller status` and the daemon log. If the daemon cannot start, the hook
 still exits cleanly, but no session begins.
+
+### Command Code hooks are not firing
+
+Confirm that `doomscroller --version` works in the same shell Command Code uses.
+Re-run `doomscroller init command-code`; it prints the settings path and the
+events it added or found. Check `~/.commandcode/settings.json` (or the directory
+in `COMMANDCODE_CONFIG_DIR`) for the `PreToolUse` and `Stop` groups. Invalid
+settings JSON is never overwritten; fix the JSON or restore
+`settings.json.doomscroller.bak`. Two behaviors are expected: hooks are skipped
+while Command Code is in plan mode, and start fires on a turn's first tool call,
+so a turn that makes no tool calls never starts a session. Check
+`doomscroller status` and the daemon log.
 
 ### `ide-activity` says "finished" too early
 

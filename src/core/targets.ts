@@ -4,7 +4,12 @@ import { TargetProvider } from './types';
 export class TargetRotator implements TargetProvider {
   private index = 0;
 
-  constructor(private readonly targets: readonly string[]) {}
+  constructor(private targets: readonly string[]) {}
+
+  setTargets(targets: readonly string[]): void {
+    this.targets = targets;
+    this.index = 0;
+  }
 
   next(): string | null {
     if (this.targets.length === 0) return null;

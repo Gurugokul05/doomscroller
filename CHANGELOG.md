@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-10-23
+
+### Changed
+
+- README: added the demo GIF and removed the placeholder TODO note.
+
+No functional changes. `docs/` is excluded from the published package, so the
+GIF does not affect the download size.
+
 ## [0.2.0] - 2026-10-23
 
 ### Added

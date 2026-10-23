@@ -1,3 +1,4 @@
+import { loadConfig } from './config';
 import { Logger, logCaught } from './logger';
 import { SessionLogger } from './stats';
 import { TargetRotator } from './targets';
@@ -18,14 +19,45 @@ export interface DaemonHandle {
 
 export async function startDaemon(config: DoomscrollerConfig, logger: Logger): Promise<DaemonHandle> {
   const windows = new Win32WindowController(config.browser, logger);
+  const sound = new WindowsSoundPlayer(config.sound, logger);
+  const targets = new TargetRotator(config.targets);
+  let currentConfig = config;
   const machine = new DoomscrollerStateMachine({
-    config,
+    config: currentConfig,
     windows,
     logger,
-    stats: new SessionLogger(config.sessionLogPath),
-    sound: new WindowsSoundPlayer(config.sound),
-    targets: new TargetRotator(config.targets),
+    stats: new SessionLogger(currentConfig.sessionLogPath),
+    sound,
+    targets,
   });
+
+  // Re-read the config file at the start of each session so edits take effect
+  // without restarting the daemon. On a missing or invalid file the previous
+  // values are kept. Port, hotkey and log paths still require a restart.
+  const refreshConfig = (): void => {
+    try {
+      const loaded = loadConfig();
+      if (!loaded.exists || loaded.error) return;
+      const next: DoomscrollerConfig = {
+        ...currentConfig,
+        delaySeconds: loaded.config.delaySeconds,
+        maxDoomscrollSeconds: loaded.config.maxDoomscrollSeconds,
+        targets: loaded.config.targets,
+        browser: loaded.config.browser,
+        sound: loaded.config.sound,
+      };
+      currentConfig = next;
+      machine.updateConfig(next);
+      targets.setTargets(next.targets);
+      windows.setBrowser(next.browser);
+      sound.setEnabled(next.sound);
+      logger.info(
+        `config reloaded (delay=${next.delaySeconds}s, cap=${next.maxDoomscrollSeconds}s, targets=${next.targets.length}, browser=${next.browser}, sound=${next.sound})`,
+      );
+    } catch (error) {
+      logCaught(logger, 'could not reload config; keeping previous values', error);
+    }
+  };
 
   const hotkeySpec = parseHotkey(config.hotkey);
   const hasIdeAgents = config.registeredAgents.some((agent) => agent.adapter === 'ide-activity');
@@ -62,6 +94,7 @@ export async function startDaemon(config: DoomscrollerConfig, logger: Logger): P
       return { ok: true, state: machine.state };
     }
     if (request.type === 'event' && (request.event === 'agent:started' || request.event === 'agent:finished')) {
+      if (request.event === 'agent:started') refreshConfig();
       void machine.handle(request.event);
       return { ok: true, state: machine.state, target: machine.currentTarget };
     }

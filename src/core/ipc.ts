@@ -175,7 +175,9 @@ export async function ensureDaemon(port: number, timeoutMs = 5000): Promise<bool
 /**
  * Hook-safe dispatch: try the daemon briefly, then hand the event to a
  * detached helper and return immediately. The hook process never waits for
- * the daemon to become ready.
+ * the daemon to become ready. The helper's ensureDaemon starts the daemon if
+ * needed, so this function must not spawn one too: two spawns race and the
+ * loser fails to bind the port (EADDRINUSE).
  */
 export async function dispatchFast(event: AgentEvent, port: number): Promise<boolean> {
   try {
@@ -185,7 +187,6 @@ export async function dispatchFast(event: AgentEvent, port: number): Promise<boo
     // fall through
   }
 
-  spawnDaemonDetached();
   spawnDispatchDetached(event);
   return false;
 }

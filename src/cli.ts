@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { installAntigravityHooks } from './adapters/antigravity-hooks';
 import { installClaudeCodeHooks } from './adapters/claude-code-hooks';
 import { installCommandCodeHooks } from './adapters/command-code-hooks';
 import { runCliWrapper } from './adapters/cli-wrapper';
@@ -9,9 +12,9 @@ import { createLogger } from './core/logger';
 import { aggregateByDay, formatDuration, readSessions } from './core/stats';
 import { AGENT_FINISHED, AGENT_STARTED, AgentEvent } from './core/types';
 import { errorMessage } from './util/errors';
-import { configFilePath } from './util/paths';
+import { configFilePath, stateDirectory } from './util/paths';
 
-export const VERSION = '0.2.1';
+export const VERSION = '0.3.0';
 
 function usage(): string {
   return `doomscroller ${VERSION} - doomscroll while your coding agent works
@@ -27,6 +30,7 @@ Usage:
   doomscroller init                   Create ~/.doomscroller.json
   doomscroller init claude-code       Merge hooks into Claude Code settings
   doomscroller init command-code      Merge hooks into Command Code settings
+  doomscroller init antigravity       Merge hooks into Antigravity hooks.json
   doomscroller config [--path|--json] Show the config path and effective config
   doomscroller stats [--days N|--all] Show doomscroll wait time per day
 
@@ -126,6 +130,117 @@ async function hookEventCommand(event: AgentEvent): Promise<number> {
 
   const loaded = loadConfig();
   await emitHookEvent(event, loaded.config.port);
+  return 0;
+}
+
+interface HookInput {
+  /** The payload exactly as it arrived, for the diagnostic log. */
+  raw: string;
+  payload: Record<string, unknown> | null;
+}
+
+/**
+ * Reads a hook payload from stdin. Bounded, because a hook runs inside the
+ * agent's execution loop and must never block it.
+ */
+async function readHookPayload(timeoutMs = 600): Promise<HookInput> {
+  const empty: HookInput = { raw: '', payload: null };
+  try {
+    if (process.stdin.isTTY) return empty;
+    return await new Promise<HookInput>((resolve) => {
+      let text = '';
+      let settled = false;
+      const done = (result: HookInput): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(result);
+      };
+      const finish = (): void => {
+        const trimmed = text.trim();
+        if (trimmed === '') {
+          done({ raw: text, payload: null });
+          return;
+        }
+        try {
+          const parsed: unknown = JSON.parse(trimmed);
+          done({
+            raw: text,
+            payload:
+              parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+                ? (parsed as Record<string, unknown>)
+                : null,
+          });
+        } catch {
+          done({ raw: text, payload: null });
+        }
+      };
+      const timer = setTimeout(finish, timeoutMs);
+      process.stdin.setEncoding('utf8');
+      process.stdin.on('data', (chunk: string) => {
+        text += chunk;
+        if (text.length > 200_000) finish();
+      });
+      process.stdin.on('end', finish);
+      process.stdin.on('error', finish);
+      process.stdin.resume();
+    });
+  } catch {
+    return empty;
+  }
+}
+
+/**
+ * Appends one entry per hook invocation to
+ * `~/.doomscroller/antigravity-hooks.log`, so it is possible to check whether
+ * the hooks fire without a daemon running. Best effort: a hook must never fail
+ * the agent because diagnostics could not be written.
+ */
+function logAntigravityHook(action: string, decision: string, raw: string): void {
+  try {
+    const logPath = path.join(stateDirectory(), 'antigravity-hooks.log');
+    const payload = raw.trim() === '' ? '(empty)' : raw.trim().replace(/\s+/g, ' ');
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
+    fs.appendFileSync(
+      logPath,
+      `${new Date().toISOString()} ${action} ${decision}\n  stdin: ${payload}\n`,
+      'utf8',
+    );
+  } catch {
+    // Diagnostics are best effort.
+  }
+}
+
+/**
+ * Antigravity hook entry point (`antigravity-hook start|done`).
+ *
+ * Antigravity fires `Stop` on every termination of the execution loop,
+ * including terminations that leave background tasks running. Its payload
+ * carries `fullyIdle`, which is only true once the agent has completely
+ * finished, so a stop with `fullyIdle: false` is not a real finish.
+ *
+ * Antigravity also expects a JSON object on stdout.
+ */
+async function antigravityHookCommand(action: string | undefined): Promise<number> {
+  if (action !== 'start' && action !== 'done') return 0;
+
+  const input = await readHookPayload();
+  const suppressed = action === 'done' && input.payload?.fullyIdle === false;
+  const decision = suppressed
+    ? 'suppressed because fullyIdle=false'
+    : action === 'start'
+      ? 'started'
+      : 'done';
+  logAntigravityHook(action, decision, input.raw);
+
+  if (suppressed) {
+    process.stdout.write('{}\n');
+    return 0;
+  }
+
+  const loaded = loadConfig();
+  await emitHookEvent(action === 'start' ? AGENT_STARTED : AGENT_FINISHED, loaded.config.port);
+  process.stdout.write('{}\n');
   return 0;
 }
 
@@ -282,7 +397,40 @@ async function initCommand(args: string[]): Promise<number> {
     return 0;
   }
 
-  process.stderr.write('Usage: doomscroller init [claude-code|command-code]\n');
+  if (args[0] === 'antigravity') {
+    const configResult = writeDefaultConfig();
+    process.stdout.write(
+      configResult.created
+        ? `Created ${configResult.path}\n`
+        : `Config already exists at ${configResult.path}\n`,
+    );
+
+    const result = installAntigravityHooks();
+    if (result.error) {
+      process.stderr.write(`Could not install Antigravity hooks: ${result.error}\n`);
+      return 1;
+    }
+
+    process.stdout.write(`Antigravity hooks: ${result.hooksPath}\n`);
+    if (result.changed) {
+      process.stdout.write(`  added: ${result.added.join(', ') || 'none'}\n`);
+      if (result.existing.length > 0) {
+        process.stdout.write(`  already present: ${result.existing.join(', ')}\n`);
+      }
+      process.stdout.write('  backup: hooks.json.doomscroller.bak\n');
+    } else {
+      process.stdout.write(
+        `  hooks already present: ${result.existing.join(', ') || 'none'}\n`,
+      );
+    }
+    process.stdout.write(
+      'PreInvocation starts a session before each model call; Stop finishes it once\n'
+        + 'the payload reports fullyIdle. Other named hooks are preserved.\n',
+    );
+    return 0;
+  }
+
+  process.stderr.write('Usage: doomscroller init [claude-code|command-code|antigravity]\n');
   return 1;
 }
 
@@ -357,6 +505,8 @@ export async function main(argv: string[]): Promise<number | null> {
         return await hookEventCommand(AGENT_STARTED);
       case 'done':
         return await hookEventCommand(AGENT_FINISHED);
+      case 'antigravity-hook':
+        return await antigravityHookCommand(argv[1]);
       case '__dispatch':
         return await dispatchHelper(argv[1]);
       case 'status':

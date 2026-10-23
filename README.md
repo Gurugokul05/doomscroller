@@ -28,6 +28,7 @@ a productivity system.
    ```powershell
    doomscroller init claude-code     # Claude Code
    doomscroller init command-code    # Command Code
+   doomscroller init antigravity     # Antigravity (App, CLI and IDE)
    ```
 
    `init command-code` merges the hooks into `~/.commandcode/settings.json` the
@@ -60,10 +61,16 @@ against that agent's current release. "Planned" means it is not implemented.
 | Claude Code | hook | Working | `doomscroller init claude-code` merges `UserPromptSubmit` → start and `Stop`/`Notification` → done into `~/.claude/settings.json`. Verify the hooks fire in your Claude Code version. |
 | Command Code | hook | Working | `doomscroller init command-code` merges `PreToolUse` → start and `Stop` → done into `~/.commandcode/settings.json`. Command Code has no per-prompt hook, so a session starts on a turn's first tool call; hooks are skipped in plan mode. Verify the hooks fire in your Command Code version. |
 | GitHub Copilot CLI | cli-wrapper | Experimental | `doomscroller run -- copilot`. Behavior depends on the CLI's terminal output. |
-| Antigravity | ide-activity | Experimental | Match the window by process and/or title, set `workspace`, and press Enter in the window. |
+| Antigravity (App, CLI, IDE) | hook | Experimental | **Primary.** `doomscroller init antigravity` merges `PreInvocation` → start and `Stop` → done into `~/.gemini/config/hooks.json`. See [Antigravity](#antigravity). |
+| Antigravity without hooks | ide-activity | Experimental | Opt-in fallback for when the hooks are not installed. Not part of the default `registeredAgents`; add an entry that matches the window by process and/or title, set `workspace`, and press Enter in the window. |
 | VS Code + Copilot | ide-activity | Experimental | Same heuristic. Use a generous `quietSeconds` and an absolute `workspace`. |
 | Other GUI IDEs (Cursor, etc.) | ide-activity | Experimental | Add a `registeredAgents` entry with the app's process/title and a workspace. |
 | Any foreground app | hotkey | Working | `Ctrl+Alt+D` starts a manual session when idle and force-returns when working. The global key press needs a real key to verify; see [Troubleshooting](#troubleshooting). |
+
+The `ide-activity` fallback starts on **any** Enter while a matching window is
+focused, so it can also fire while you are editing a file, and it misses prompts
+sent with the send button. A modified Enter (Shift/Ctrl/Alt+Enter) is ignored.
+Where an agent exposes hooks, that path is the accurate one.
 
 A terminal agent without hooks can also be wrapped with
 `doomscroller run -- <command>` (for example `doomscroller run -- cmdc`). The
@@ -74,6 +81,42 @@ macOS and Linux support is **planned**. The state machine and tests are
 platform-neutral, but window control is Win32-only. See
 [CONTRIBUTING.md](https://github.com/Gurugokul05/doomscroller/blob/main/CONTRIBUTING.md#adding-os-support)
 for the `WindowController` interface.
+
+## Antigravity
+
+Antigravity exposes hooks on the App, the CLI and the IDE, and they are the
+**primary** signal: a session starts from `PreInvocation` and finishes from
+`Stop`. Install them with:
+
+```powershell
+doomscroller init antigravity
+```
+
+This merges a `doomscroller` group into `~/.gemini/config/hooks.json`, the global
+hooks file that all three surfaces load. Other named hooks are preserved, and the
+file is backed up to `hooks.json.doomscroller.bak`. Re-running the command
+upgrades an older quoted-path command in place instead of adding a second one.
+
+Two things to know:
+
+- **One session per prompt.** `PreInvocation` fires before every model call, so
+  a session starts on each prompt you submit — including a prompt sent with the
+  send button, which the Enter-based fallback can never see.
+- **No `ide-activity` entry.** The default `registeredAgents` is empty, so the
+  hooks are the only Antigravity signal. Do not add an `ide-activity` Antigravity
+  entry back: Enter and the hooks would both try to start sessions, and the Enter
+  path also fires while you are editing. (If you upgraded from an older config,
+  delete that entry or set the list to `[]`.)
+
+`Stop` only finishes a session when its payload reports `fullyIdle`, so a stop
+that still has background tasks running does not end a session early.
+
+Every hook invocation is appended to `~/.doomscroller/antigravity-hooks.log` with
+the raw stdin payload and the decision (`started`, `done`, or
+`suppressed because fullyIdle=false`). That file is the quickest way to check
+whether the hooks fire at all. Note that Antigravity's `hooks.json` is written
+**without** a UTF-8 BOM on purpose: its Go JSON parser rejects a BOM and then
+silently loads no hooks at all.
 
 ## Config
 
@@ -96,15 +139,7 @@ fall back to the defaults, and the tool keeps running.
   "browser": "auto",
   "port": 45871,
   "idleCpuPercent": 5,
-  "registeredAgents": [
-    {
-      "name": "Antigravity",
-      "adapter": "ide-activity",
-      "match": { "process": "Antigravity", "title": "Antigravity" },
-      "workspace": "C:\\code\\my-project",
-      "quietSeconds": 20
-    }
-  ],
+  "registeredAgents": [],
   "logPath": "~/.doomscroller/doomscroller.log",
   "sessionLogPath": "~/.doomscroller/sessions.jsonl"
 }
@@ -121,7 +156,7 @@ fall back to the defaults, and the tool keeps running.
 | `browser` | `"auto"` | `auto`, `edge`, `chrome`, `brave`, `firefox`, or `default`. `auto` reads the Windows default browser for HTTPS and falls back to Edge/Chrome. `default` launches through the shell and detects a new window from a known browser process. |
 | `port` | `45871` | Local daemon IPC port, bound to `127.0.0.1`. |
 | `idleCpuPercent` | `5` | IDE finish threshold as a percentage of one CPU core. Activity at or below this is considered idle. |
-| `registeredAgents` | one Antigravity entry | GUI windows for the IDE adapter. `[]` disables IDE activity. |
+| `registeredAgents` | `[]` | GUI windows for the IDE adapter. Add entries only for agents without hooks (or for other GUI IDEs). `[]` disables IDE activity. |
 | `logPath` | `~/.doomscroller/doomscroller.log` | Daemon log. Absolute paths and `~/...` are supported. |
 | `sessionLogPath` | `~/.doomscroller/sessions.jsonl` | Session records read by `doomscroller stats`. Absolute paths and `~/...` are supported. |
 
@@ -183,6 +218,7 @@ config. Use `doomscroller config --path` for only the path or
 | `doomscroller init` | Create `~/.doomscroller.json` if it does not exist. |
 | `doomscroller init claude-code` | Create the config and merge the Claude Code hooks into `~/.claude/settings.json`. Existing hooks are preserved, and `settings.json.doomscroller.bak` is created when the file already exists. |
 | `doomscroller init command-code` | Create the config and merge the Command Code hooks into `~/.commandcode/settings.json` (`PreToolUse` → start, `Stop` → done). Existing hooks are preserved, and `settings.json.doomscroller.bak` is created when the file already exists. |
+| `doomscroller init antigravity` | Create the config and merge the doomscroller hooks into `~/.gemini/config/hooks.json` (`PreInvocation` → start, `Stop` → done only when the payload reports `fullyIdle`). Other named hooks are preserved, and `hooks.json.doomscroller.bak` is created when the file already exists. |
 | `doomscroller start` | Emit `agent:started`. Hook-safe: exits quickly, never blocks the agent, and auto-starts the daemon if needed. |
 | `doomscroller done` | Emit `agent:finished`. Same hook-safe behavior. |
 | `doomscroller run -- <command>` | Run a terminal agent in a PTY. Enter starts, output resets the quiet timer, `quietSeconds` of silence or process exit finishes. |

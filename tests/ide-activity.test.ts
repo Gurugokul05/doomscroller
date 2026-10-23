@@ -127,6 +127,17 @@ describe('IdeActivityAdapter', () => {
     expect(harness.adapter.isMonitoring).toBe(false);
   });
 
+  it('ignores Enter combined with a modifier key', async () => {
+    const harness = createHarness();
+
+    await harness.adapter.handleKeyEvent({ ...enter(), shift: true });
+    await harness.adapter.handleKeyEvent({ ...enter(), ctrl: true });
+    await harness.adapter.handleKeyEvent({ ...enter(), alt: true });
+
+    expect(harness.machine.events).toEqual([]);
+    expect(harness.adapter.isMonitoring).toBe(false);
+  });
+
   it('does not start when another adapter already owns the session', async () => {
     const harness = createHarness();
     harness.machine.state = 'working' as CoreState;

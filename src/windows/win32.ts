@@ -143,17 +143,59 @@ export class Win32WindowController implements WindowController {
     return toWindow(result.window);
   }
 
+  /**
+   * A saved HWND can go stale: browsers replace their startup window and some
+   * apps recreate their top-level window. Re-resolve once by process name so a
+   * session end can still act on something sensible instead of just failing.
+   */
+  private async replaceStaleHandle(handle: WindowHandle): Promise<WindowHandle | null> {
+    if (!handle.processName) return null;
+    try {
+      const candidates = await this.findWindows({ process: handle.processName });
+      const live = candidates.find((entry) => entry.id !== handle.id) ?? candidates[0];
+      return live ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   async minimizeWindow(handle: WindowHandle): Promise<void> {
     const result = await this.invoke('minimize', ['-Handle', handle.id], 8000);
-    if (!result?.ok) {
-      throw new Error(typeof result?.error === 'string' ? result.error : 'minimize failed');
+    if (result?.ok) return;
+
+    const replacement = await this.replaceStaleHandle(handle);
+    if (replacement) {
+      const retry = await this.invoke('minimize', ['-Handle', replacement.id], 8000);
+      if (retry?.ok) {
+        this.logger?.warn(
+          `window ${handle.id} was no longer valid; minimized the live ` +
+            `${replacement.processName} window ${replacement.id} instead`,
+        );
+        return;
+      }
     }
+
+    throw new Error(typeof result?.error === 'string' ? result.error : 'minimize failed');
   }
 
   async restoreAndFocusWindow(handle: WindowHandle): Promise<boolean> {
     // The PowerShell helper restores the window and applies the Alt-key
     // foreground-lock workaround before calling SetForegroundWindow.
     const result = await this.invoke('focus', ['-Handle', handle.id], 10000);
+    if (result?.ok && result.focused) return true;
+
+    const replacement = await this.replaceStaleHandle(handle);
+    if (replacement) {
+      const retry = await this.invoke('focus', ['-Handle', replacement.id], 10000);
+      if (retry?.ok && retry.focused) {
+        this.logger?.warn(
+          `window ${handle.id} was no longer valid; restored the live ` +
+            `${replacement.processName} window ${replacement.id} instead`,
+        );
+        return true;
+      }
+    }
+
     return Boolean(result?.ok && result.focused);
   }
 

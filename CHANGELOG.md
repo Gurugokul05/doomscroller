@@ -3,6 +3,55 @@
 All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-10-23
+
+### Added
+
+- `doomscroller init antigravity` merges `PreInvocation` → start and `Stop` → done
+  into `~/.gemini/config/hooks.json`, the global hooks file shared by the
+  Antigravity App, CLI and IDE. A `Stop` only finishes a session when its payload
+  reports `fullyIdle`, which excludes terminations that still have background
+  tasks running. `hooks.json` is always written without a UTF-8 BOM: Antigravity
+  parses it with Go's JSON decoder, which rejects a BOM and then silently loads
+  no hooks at all.
+- Hook invocations are appended to `~/.doomscroller/antigravity-hooks.log` with
+  the raw stdin payload and the decision, so the hooks can be checked even with
+  no daemon running.
+
+### Changed
+
+- Antigravity hooks are the **primary** signal for that agent, so the default
+  `registeredAgents` is now `[]` and no longer ships an Antigravity `ide-activity`
+  entry. Leaving it in place let Enter-based sessions and hook sessions both
+  start, and they conflict. `PreInvocation` fires before every model call, so a
+  session starts on each prompt you submit — one session per prompt, including
+  prompts sent with the send button that the Enter fallback never sees. Existing
+  configs keep their entry; remove it (or set the list to `[]`) to match. The
+  `ide-activity` fallback remains available as an opt-in for agents without
+  hooks.
+
+### Fixed
+
+- The Antigravity hook command no longer starts with a quoted path. Antigravity
+  runs hook commands through a shell, where a leading quoted path is not
+  executed. `init antigravity` now emits the bare
+  `node <cli> antigravity-hook <action>` form when nothing needs quoting, and
+  otherwise `powershell.exe -NoProfile -Command "& '<node>' '<cli>'
+  antigravity-hook <action>"`.
+- Re-running `doomscroller init antigravity` upgrades a hooks file written by an
+  older release in place, rather than appending a second handler that would never
+  run. Re-running against the current form is still a no-op, and no other hook
+  group is ever touched.
+- Stale window handles no longer break the end of a session. A browser can
+  replace the window it exposes at launch, so the saved handle was frequently
+  invalid by the time a session ended: `minimize` failed with "invalid window
+  handle" and the doomscroll browser stayed open, covering the agent window that
+  had just been restored. Browser window detection now requires the same window
+  on two consecutive polls, and a stale handle is re-resolved once by process
+  name before minimize or restore gives up.
+- The `ide-activity` fallback no longer starts a session on Shift/Ctrl/Alt+Enter,
+  which are newline and shortcut keys rather than prompt submissions.
+
 ## [0.2.1] - 2026-10-23
 
 ### Changed

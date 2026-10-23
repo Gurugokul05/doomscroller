@@ -259,8 +259,15 @@ function Invoke-OpenUrl {
 
     $deadline = (Get-Date).AddSeconds(8)
     $found = $null
+    $candidate = $null
+    $candidateId = ''
+    # Require the same window on two consecutive polls. A freshly launched
+    # browser can expose a transient top-level window that it destroys moments
+    # later; returning that handle makes the later minimize fail with
+    # "invalid window handle".
     while ((Get-Date) -lt $deadline) {
         Start-Sleep -Milliseconds 150
+        $current = $null
         foreach ($windowHandle in [DSDoomWin32]::Windows()) {
             if (-not (Test-UsableWindow $windowHandle)) { continue }
             $info = Get-WindowInfo $windowHandle
@@ -273,11 +280,26 @@ function Invoke-OpenUrl {
                 continue
             }
             if ([string]::IsNullOrWhiteSpace($info.title)) { continue }
-            $found = $info
+            $current = $info
             break
         }
-        if ($found) { break }
+
+        if ($null -eq $current) {
+            $candidate = $null
+            $candidateId = ''
+            continue
+        }
+        if ($candidateId -eq $current.id) {
+            $found = $current
+            break
+        }
+        $candidate = $current
+        $candidateId = $current.id
     }
+
+    # Stable window preferred; fall back to the last candidate so a browser
+    # that keeps swapping windows does not abort the session entirely.
+    if (-not $found -and $candidate) { $found = $candidate }
 
     return $found
 }

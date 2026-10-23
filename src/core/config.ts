@@ -32,13 +32,7 @@ export function defaultConfig(): DoomscrollerConfig {
     browser: 'auto',
     port: 45871,
     idleCpuPercent: 5,
-    registeredAgents: [
-      {
-        name: 'Antigravity',
-        adapter: 'ide-activity',
-        match: { process: 'antigravity' },
-      },
-    ],
+    registeredAgents: [],
     logPath: defaultLogPath(),
     sessionLogPath: defaultSessionLogPath(),
   };

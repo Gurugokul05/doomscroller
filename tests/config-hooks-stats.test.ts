@@ -46,7 +46,7 @@ describe('config', () => {
       'https://x.com/',
       'https://www.youtube.com/shorts',
     ]);
-    expect(config.registeredAgents[0].adapter).toBe('ide-activity');
+    expect(config.registeredAgents).toEqual([]);
   });
 
   it('merges valid values and ignores invalid ones', () => {

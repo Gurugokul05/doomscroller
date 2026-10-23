@@ -47,6 +47,17 @@ export function commandCodeSettingsPath(): string {
   return path.join(base, 'settings.json');
 }
 
+/**
+ * The global hooks file shared by the Antigravity App, CLI and IDE. Workspace
+ * level hooks live in `<workspace>/.agents/hooks.json` instead.
+ */
+export function antigravityHooksPath(): string {
+  const base = process.env.ANTIGRAVITY_CONFIG_DIR
+    ? path.resolve(expandHome(process.env.ANTIGRAVITY_CONFIG_DIR))
+    : path.join(os.homedir(), '.gemini', 'config');
+  return path.join(base, 'hooks.json');
+}
+
 export function packageRoot(): string {
   // dist/util -> package root, or src/util -> package root.
   return path.resolve(__dirname, '..', '..');

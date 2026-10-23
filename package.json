@@ -1,6 +1,6 @@
 {
   "name": "@gurugokul/doomscroller",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Doomscroll while your AI coding agent works, then bring the agent window back when it finishes.",
   "license": "MIT",
   "publishConfig": {

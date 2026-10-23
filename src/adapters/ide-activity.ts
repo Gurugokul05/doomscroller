@@ -111,6 +111,10 @@ export class IdeActivityAdapter {
   async handleKeyEvent(event: KeyEvent): Promise<void> {
     try {
       if (event.key !== 'ENTER' || !event.window) return;
+      // Shift+Enter is a newline in most agent chat inputs, and a modified
+      // Enter is a shortcut elsewhere in the window. Neither submits a prompt,
+      // so neither should start a session.
+      if (event.ctrl || event.alt || event.shift) return;
       if (this.session || this.starting || this.finishing) return;
       if (this.currentState() === 'working') return;
 
